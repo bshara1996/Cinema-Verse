@@ -1,0 +1,39 @@
+.layout {
+    display: flex;
+    flex-direction: column;
+    background-color: var(--darker-bg);
+}
+
+.main-content {
+    flex: 1;
+    padding-top: 50px;
+    /* Space for fixed navbar */
+    min-height: calc(100vh - 160px);
+    background-color: var(--darker-bg);
+    animation: fadeIn 0.6s ease-out;
+}
+
+/* Ensure proper spacing on various screen sizes */
+@media (max-width: 1200px) {
+    .main-content {
+        padding-top: 160px;
+    }
+}
+
+@media (max-width: 900px) {
+    .main-content {
+        padding-top:45px; /* Account for column layout of navbar */
+    }
+}
+
+@media (max-width: 600px) {
+    .main-content {
+        padding-top: 40px; 
+    }
+}
+
+@media (max-width: 450px) {
+    .main-content {
+        padding-top: 30px; /* Additional space for wrapped filters on small phones */
+    }
+}
