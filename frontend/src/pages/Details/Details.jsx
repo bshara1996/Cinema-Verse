@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import api from "../../services/api";
 import MovieCard from "../../components/MovieCard/MovieCard";
 import NotFound from "../NotFound/NotFound";
@@ -12,12 +12,17 @@ import {
   FaVideo,
   FaClosedCaptioning,
   FaUsers,
+  FaCalendarAlt,
+  FaClock,
 } from "react-icons/fa";
 import Loader from "../../components/Loader/Loader";
 import "./Details.css";
 
 const Details = () => {
   const { id } = useParams();
+  const location = useLocation();
+  const stateMovie = location.state?.movie;
+  const stateImdbCode = stateMovie?.imdb_code;
   const [movie, setMovie] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -54,9 +59,9 @@ const Details = () => {
   useEffect(() => {
     // Disable browser's automatic scroll restoration first
     if (window.history.scrollRestoration) {
-      window.history.scrollRestoration = 'manual';
+      window.history.scrollRestoration = "manual";
     }
-    
+
     // Use multiple methods to ensure scroll to absolute top
     const scrollToTop = () => {
       window.scrollTo(0, 0);
@@ -66,16 +71,16 @@ const Details = () => {
         window.scroll(0, 0);
       }
     };
-    
+
     // Execute immediately
     scrollToTop();
-    
+
     // Also try after a short delay to catch any late renders
     const timeoutId = setTimeout(scrollToTop, 0);
     const rafId = requestAnimationFrame(() => {
       scrollToTop();
     });
-    
+
     return () => {
       clearTimeout(timeoutId);
       cancelAnimationFrame(rafId);
@@ -87,7 +92,30 @@ const Details = () => {
       setLoading(true);
       setError(null);
       try {
-        const detailsData = await api.getMovieDetails(id);
+        // 1. Fetch Request 1 (Critical): Movie Base Data + Suggestions (Parallel)
+        // If we have stateImdbCode, we also fetch IMDb details in parallel
+        const promises = [
+          api.getMovieDetails(id, {
+            include_imdb: false,
+            imdb_code: stateImdbCode,
+          }),
+          api.getSuggestions(id),
+        ];
+
+        let imdbPromiseIndex = -1;
+        if (stateImdbCode) {
+          imdbPromiseIndex =
+            promises.push(api.getImdbDetails(stateImdbCode)) - 1;
+        }
+
+        const results = await Promise.all(promises);
+        const detailsData = results[0];
+        const suggestionsData = results[1];
+        const imdbRes =
+          imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
+
+        let currentMovieData = null;
+
         if (
           detailsData &&
           detailsData.data &&
@@ -96,16 +124,23 @@ const Details = () => {
           detailsData.data.movie.id !== 0 &&
           detailsData.data.movie.title
         ) {
-          const movieData = detailsData.data.movie;
-          setMovie(movieData);
+          currentMovieData = detailsData.data.movie;
 
-          // Update the browser tab title with the movie name and year
-          document.title = `${movieData.title} (${movieData.year}) - CinemaVerse`;
+          // Merge IMDb data if we got it in parallel
+          if (imdbRes && imdbRes.data) {
+            currentMovieData = { ...currentMovieData, ...imdbRes.data };
+          }
+
+          setMovie(currentMovieData);
+
+          // Update the browser tab title
+          document.title = `${currentMovieData.title} (${currentMovieData.year}) - CinemaVerse`;
         } else {
           setError("Movie not found");
+          setLoading(false);
+          return;
         }
 
-        const suggestionsData = await api.getSuggestions(id);
         if (
           suggestionsData &&
           suggestionsData.data &&
@@ -114,32 +149,52 @@ const Details = () => {
           setSuggestions(suggestionsData.data.movies);
         }
 
-        // Fetch Subtitles
-        if (detailsData.data.movie.imdb_code) {
-          try {
-            const subsData = await api.getSubtitles(
-              detailsData.data.movie.imdb_code
-            );
-            if (subsData && subsData.data) {
-              setSubtitles(subsData.data);
-            }
-          } catch (subErr) {
-            console.error("Failed to load subtitles:", subErr);
-          }
-        }
-
-        // Preload critical images
+        // 2. Preload critical images
         const backdropUrl =
-          detailsData.data.movie.background_image_original ||
-          detailsData.data.movie.background_image;
+          currentMovieData.background_image_original ||
+          currentMovieData.background_image;
         const posterUrl =
-          detailsData.data.movie.large_cover_image ||
-          detailsData.data.movie.medium_cover_image;
+          currentMovieData.large_cover_image ||
+          currentMovieData.medium_cover_image;
 
         await Promise.all([preloadImage(backdropUrl), preloadImage(posterUrl)]);
+
+        // STOP LOADING HERE - Show the page!
+        setLoading(false);
+
+        // 3. Fetch Request 2 (Background): Extended Details (IMDB) + Subtitles
+        if (currentMovieData.imdb_code) {
+          api
+            .getSubtitles(currentMovieData.imdb_code)
+            .then((subsData) => {
+              if (subsData && subsData.data) {
+                setSubtitles(subsData.data);
+              }
+            })
+            .catch((subErr) =>
+              console.error("Failed to load subtitles:", subErr)
+            );
+
+          // Only fetch IMDb details if we didn't get them in the initial parallel request
+          if (imdbPromiseIndex === -1) {
+            api
+              .getImdbDetails(currentMovieData.imdb_code)
+              .then((imdbRes) => {
+                if (imdbRes && imdbRes.data) {
+                  setMovie((prev) => ({
+                    ...prev,
+                    ...imdbRes.data,
+                  }));
+                }
+              })
+              .catch((err) =>
+                console.error("Failed to load extended details:", err)
+              );
+          }
+        }
       } catch (err) {
+        console.error(err);
         setError("Failed to load movie details");
-      } finally {
         setLoading(false);
       }
     };
@@ -169,6 +224,23 @@ const Details = () => {
     if (p.name)
       return `https://www.imdb.com/find?q=${encodeURIComponent(p.name)}`;
     return null;
+  };
+
+  const formatRuntime = (minutes) => {
+    if (!minutes) return "0m";
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 0) return `${mins}m`;
+    if (mins === 0) return `${hours}h`;
+    return `${hours}h ${mins}m`;
+  };
+
+  const formatVoteCount = (count) => {
+    if (!count) return "";
+    return new Intl.NumberFormat("en-US", {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(count);
   };
 
   const scrollToSection = (id) => {
@@ -240,9 +312,10 @@ const Details = () => {
   }
 
   // Filter out invalid/empty movies from suggestions
-  const validSuggestions = suggestions && Array.isArray(suggestions) 
-    ? suggestions.filter(movie => movie && movie.id && movie.title)
-    : [];
+  const validSuggestions =
+    suggestions && Array.isArray(suggestions)
+      ? suggestions.filter((movie) => movie && movie.id && movie.title)
+      : [];
 
   return (
     <div className="details-page">
@@ -281,20 +354,57 @@ const Details = () => {
 
           <div className="hero-info">
             <h1 className="hero-title">{movie.title}</h1>
+
+            <div className="hero-meta">
+              <div className="hero-info-bar">
+                <div className="info-main">
+                  <div className="info-item">
+                    <FaCalendarAlt />
+                    <span>{movie.year || "—"}</span>
+                  </div>
+                  <div className="info-item">
+                    <FaClock />
+                    <span>{formatRuntime(movie.runtime)}</span>
+                  </div>
+                  <div className="info-item">
+                    <FaGlobe />
+                    <span>{getLanguageName(movie.language) || "N/A"}</span>
+                  </div>
+                </div>
+                {movie.imdb_code && (
+                  <a
+                    href={`https://www.imdb.com/title/${movie.imdb_code}/`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rating-chip info-rating-chip"
+                  >
+                    <FaStar className="rating-chip-star" />
+                    <div className="rating-chip-text">
+                      <span className="rating-value">
+                        {typeof movie.rating === "number"
+                          ? movie.rating.toFixed(1)
+                          : movie.rating}
+                      </span>
+                      {movie.vote_count && (
+                        <span className="vote-count">
+                          {formatVoteCount(movie.vote_count)} Votes
+                        </span>
+                      )}
+                    </div>
+                    <span className="imdb-pill">IMDb</span>
+                  </a>
+                )}
+              </div>
+            </div>
+
             <div className="hero-actions">
               {(movie.imdb_code || movie.yt_trailer_code) && (
-                <button
-                  className="btn btn-primary"
-                  onClick={scrollToMovie}
-                >
-                  <FaPlay /> Watch
+                <button className="btn btn-ghost" onClick={scrollToMovie}>
+                  <FaPlay /> Watch Now
                 </button>
               )}
-        {movie.yt_trailer_code && (
-                <button
-                  className="btn btn-ghost"
-                  onClick={scrollToTrailer}
-                >
+              {movie.yt_trailer_code && (
+                <button className="btn btn-ghost" onClick={scrollToTrailer}>
                   <FaVideo /> Trailer
                 </button>
               )}
@@ -305,7 +415,6 @@ const Details = () => {
                 <FaDownload /> Download
               </button>
 
-          
               <button
                 className="btn btn-ghost"
                 onClick={() => scrollToSection("subtitle-section")}
@@ -320,91 +429,29 @@ const Details = () => {
                 <FaUsers /> Cast & Crew
               </button>
             </div>
-            <div className="hero-meta-group">
-              <span className="hero-year">{movie.year}</span>
-              <span className="hero-separator">•</span>
-              <span className="hero-duration">{movie.runtime}m</span>
-              <span className="hero-separator">•</span>
-              <div className="hero-rating">
-                <FaStar className="star-icon" />
-                <span>{movie.rating}</span>
-              </div>
-              {movie.imdb_code && (
-                <a
-                  href={`https://www.imdb.com/title/${movie.imdb_code}/`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="imdb-badge"
-                >
-                  IMDb
-                </a>
-              )}
-            </div>
-
-            <div className="hero-genres">
-              {movie.genres &&
-                movie.genres.map((g) => (
-                  <Link
-                    key={g}
-                    to={`/?genre=${encodeURIComponent(g.toLowerCase())}`}
-                    className="genre-tag"
-                  >
-                    {g}
-                  </Link>
-                ))}
-            </div>
 
             <div className="hero-excerpt">
-              <h3 className="hero-excerpt-title">Plot Summary</h3>
+              <div className="excerpt-header">
+                <h3 className="hero-excerpt-title">Plot Summary</h3>
+                <div className="genre-badges">
+                  {movie.genres &&
+                    movie.genres.map((g) => (
+                      <Link
+                        key={g}
+                        to={`/?genre=${encodeURIComponent(g.toLowerCase())}`}
+                        className="genre-pill"
+                      >
+                        {g}
+                      </Link>
+                    ))}
+                </div>
+              </div>
               <p>
                 {movie.plot_summary ||
-                  movie.description_full ||
-                  "No description available."}
+                  (movie.imdb_code
+                    ? "No plot summary available for this movie."
+                    : "No description available.")}
               </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Movie Info Cards Section - Moved to top for prominence */}
-      <div className="container">
-        <div className="info-cards-section">
-          <div className="info-card">
-            <div className="info-card-icon">
-              <FaStar />
-            </div>
-            <div className="info-card-content">
-              <span className="info-card-label">Rating</span>
-              <span className="info-card-value">{movie.rating} / 10</span>
-            </div>
-          </div>
-          <div className="info-card">
-            <div className="info-card-icon">
-              <FaFilm />
-            </div>
-            <div className="info-card-content">
-              <span className="info-card-label">Year</span>
-              <span className="info-card-value">{movie.year}</span>
-            </div>
-          </div>
-          <div className="info-card">
-            <div className="info-card-icon">
-              <FaGlobe />
-            </div>
-            <div className="info-card-content">
-              <span className="info-card-label">Language</span>
-              <span className="info-card-value">
-                {getLanguageName(movie.language)}
-              </span>
-            </div>
-          </div>
-          <div className="info-card">
-            <div className="info-card-icon">
-              <FaDownload />
-            </div>
-            <div className="info-card-content">
-              <span className="info-card-label">Duration</span>
-              <span className="info-card-value">{movie.runtime} min</span>
             </div>
           </div>
         </div>
@@ -420,7 +467,7 @@ const Details = () => {
                 className="detail-section video-section"
               >
                 <div className="section-header">
-                  <h3 className="section-title">Watch</h3>
+                  <h3 className="section-title">Media</h3>
                   {movie.yt_trailer_code && movie.imdb_code && (
                     <div className="video-mode-toggle">
                       <button
@@ -444,13 +491,13 @@ const Details = () => {
                 </div>
                 <div className="video-player-wrapper">
                   {videoMode === "trailer" && movie.yt_trailer_code ? (
-                  <iframe
-                    src={`https://www.youtube.com/embed/${movie.yt_trailer_code}?rel=0&showinfo=0&autoplay=0`}
-                    title={`${movie.title} Trailer`}
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  ></iframe>
+                    <iframe
+                      src={`https://www.youtube.com/embed/${movie.yt_trailer_code}?rel=0&showinfo=0&autoplay=0`}
+                      title={`${movie.title} Trailer`}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    ></iframe>
                   ) : videoMode === "movie" && movie.imdb_code ? (
                     <iframe
                       src={`https://vidsrcme.ru/embed/movie/${movie.imdb_code}`}
@@ -464,19 +511,16 @@ const Details = () => {
               </section>
             )}
 
-            {(movie.directors ||
-              movie.director ||
-              (movie.actors && movie.actors.length > 0)) && (
-              <section
-                id="cast-section"
-                className="detail-section cast-section"
-              >
-                <div className="section-header">
-                  <h3 id="cast-title" className="section-title">
-                    Cast & Crew
-                  </h3>
-                </div>
-                <div className="cast-scroll-container">
+            <section id="cast-section" className="detail-section cast-section">
+              <div className="section-header">
+                <h3 id="cast-title" className="section-title">
+                  Cast & Crew
+                </h3>
+              </div>
+              <div className="cast-scroll-container">
+                {(movie.directors && movie.directors.length > 0) ||
+                movie.director ||
+                (movie.actors && movie.actors.length > 0) ? (
                   <div className="cast-grid">
                     {(movie.directors || movie.director) &&
                       (movie.directors
@@ -580,9 +624,21 @@ const Details = () => {
                         );
                       })}
                   </div>
-                </div>
-              </section>
-            )}
+                ) : (
+                  <div className="no-cast-info">
+                    {movie.imdb_code && !movie.actors && !movie.directors ? (
+                      <p className="loading-cast">
+                        Loading cast and crew information...
+                      </p>
+                    ) : (
+                      <p className="no-data-msg">
+                        No cast and crew information available for this movie.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
           </div>
 
           {/* Sidebar Column */}
@@ -619,7 +675,11 @@ const Details = () => {
                     </a>
                   ))
                 ) : (
-                  <p className="no-downloads">No downloads available</p>
+                  <div className="no-data-card no-downloads">
+                    <p className="no-data-msg">
+                      No downloads available for this movie.
+                    </p>
+                  </div>
                 )}
               </div>
             </section>
@@ -671,7 +731,11 @@ const Details = () => {
                   </div>
                 </>
               ) : (
-                <p className="no-subs">No subtitles found for this movie.</p>
+                <div className="no-data-card no-subs">
+                  <p className="no-data-msg">
+                    No subtitles found for this movie.
+                  </p>
+                </div>
               )}
             </section>
           </div>
@@ -683,7 +747,11 @@ const Details = () => {
             {validSuggestions.length > 0 ? (
               validSuggestions.map((s) => <MovieCard key={s.id} movie={s} />)
             ) : (
-              <p className="no-suggestions">No similar movies found. Check back later for recommendations!</p>
+              <div className="no-data-card no-suggestions">
+                <p className="no-data-msg">
+                  No similar movies found. Check back later for recommendations!
+                </p>
+              </div>
             )}
           </div>
         </div>

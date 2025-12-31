@@ -110,7 +110,7 @@ const Home = () => {
                         <>
                             <div className="results-count">
                                 {totalCount > 0 && (
-                                    <span>Found {totalCount} movies</span>
+                                    <span>Found {totalCount?.toLocaleString()} movies</span>
                                 )}
                             </div>
                             <div className="movie-grid">

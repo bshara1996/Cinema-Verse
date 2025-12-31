@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const ScrollToTop = () => {
-    const { pathname } = useLocation();
+    const { pathname, search } = useLocation();
 
     const scrollToTop = () => {
         // Use multiple methods to ensure scroll to absolute top
@@ -31,7 +31,7 @@ const ScrollToTop = () => {
             clearTimeout(timeoutId);
             cancelAnimationFrame(rafId);
         };
-    }, [pathname]);
+    }, [pathname, search]);
 
     // Also scroll to top on initial mount/page refresh
     useEffect(() => {

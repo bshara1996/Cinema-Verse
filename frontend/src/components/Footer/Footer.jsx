@@ -27,8 +27,10 @@ const Footer = () => {
                     <a href="https://yts.lt/api" target="_blank" rel="noopener noreferrer">YTS</a>
                     ,{" "}
                     <a href="https://imdbapi.dev/" target="_blank" rel="noopener noreferrer">IMDbAPI.dev</a>
-                    {" "}and{" "}
+                    ,{" "}
                     <a href="https://vidsrcme.ru/" target="_blank" rel="noopener noreferrer">VidSrc</a>
+                    {" "}and{" "}
+                    <a href="https://subsource.net/api-docs" target="_blank" rel="noopener noreferrer">SubSource</a>
                 </p>
             </div>
         </footer>

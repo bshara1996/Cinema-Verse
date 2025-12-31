@@ -190,15 +190,7 @@ const Navbar = () => {
             </form>
           </div>
 
-          {hasActiveFilters() && (
-            <button
-              className="navbar-clear-btn"
-              onClick={handleClearFilters}
-              title="Reset all filters"
-            >
-              <FaTimes /> Clear
-            </button>
-          )}
+
 
           <div className="navbar-filters">
             {/* Quality Filter */}
@@ -677,6 +669,15 @@ const Navbar = () => {
               </div>
             </div>
           </div>
+          {hasActiveFilters() && (
+            <button
+              className="navbar-clear-btn"
+              onClick={handleClearFilters}
+              title="Reset all filters"
+            >
+              <FaTimes /> Clear
+            </button>
+          )}
         </div>
       </div>
     </nav>

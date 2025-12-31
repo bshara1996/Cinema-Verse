@@ -13,9 +13,19 @@ const api = {
         }
     },
 
-    async getMovieDetails(id) {
+    async getMovieDetails(id, options = {}) {
         try {
-            const response = await axios.get(`${API_BASE_URL}/movies/${id}`);
+            const response = await axios.get(`${API_BASE_URL}/movies/${id}`, { params: options });
+            return response.data;
+        } catch (error) {
+            console.error('API Error:', error);
+            throw error;
+        }
+    },
+
+    async getImdbDetails(imdbCode) {
+        try {
+            const response = await axios.get(`${API_BASE_URL}/imdb/${imdbCode}`);
             return response.data;
         } catch (error) {
             console.error('API Error:', error);
